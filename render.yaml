@@ -1,0 +1,26 @@
+# Render Blueprint for the Ekkala Thoni WhatsApp auto-reply.
+# Deploy: push this folder to GitHub, then in Render create a Web Service
+# from the repo — Render detects this file and fills in the settings.
+# See DEPLOY.md for the exact steps.
+services:
+  - type: web
+    name: ekkala-thoni-whatsapp-reply
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    envVars:
+      - key: TEMPLATES_DIR
+        value: /app/templates
+      - key: WHISPER_MODEL
+        value: tiny
+      # Secrets — sync: false means the value is NOT stored in this file.
+      # Set them in the Render dashboard (Environment tab). The service
+      # runs in DRY_RUN (classify + log only) until they are set.
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_ACCESS_TOKEN
+        sync: false
+      - key: WHATSAPP_VERIFY_TOKEN
+        sync: false

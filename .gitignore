@@ -1,0 +1,6 @@
+# Local-only files — never commit these to the GitHub repo.
+venv/
+logs/
+.env
+pending.json
+*.log

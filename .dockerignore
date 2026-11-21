@@ -1,0 +1,9 @@
+# Never send these into the Docker build (the venv is 450 MB and is
+# rebuilt in the image from requirements.txt; .env holds secrets).
+venv/
+logs/
+.env
+node_modules/
+.git
+pending.json
+*.log
