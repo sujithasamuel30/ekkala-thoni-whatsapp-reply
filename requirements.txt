@@ -12,7 +12,7 @@ httpcore2==2.16.2
 httpx2==2.16.2
 huggingface_hub==2.4.0
 idna==3.20
-numpy==2.5.5
+numpy==2.4.3
 onnxruntime==1.32.0
 packaging==26.3
 protobuf==7.36.2
