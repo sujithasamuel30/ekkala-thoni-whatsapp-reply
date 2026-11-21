@@ -13,8 +13,10 @@ FROM node:22-bookworm-slim
 # Python + ffmpeg for faster-whisper (voice messages).
 # PyAV wheels bundle their own FFmpeg libs, but the ffmpeg package is
 # cheap insurance for audio decoding.
+# tesseract-ocr: reads Google Pay receipt screenshots so the server can tell
+# a payment screenshot (offering) apart from a random photo (no reply).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3 python3-venv python3-pip ffmpeg \
+      python3 python3-venv python3-pip ffmpeg tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

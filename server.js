@@ -9,6 +9,10 @@
  *  - Classifies the text as prayer request, offering, or joining
  *    (new member wanting to join — see classify.js).
  *  - Sends back the matching template IMAGE via the WhatsApp Cloud API.
+ *  - Replies are DELAYED: they go out 2 hours after the member messages
+ *    (REPLY_DELAY_HOURS, default 2), not immediately — Sujitha, 2026-11-21.
+ *    Queued in pending-replies.json, so a restart doesn't lose them.
+ *    Well inside WhatsApp's 24-hour service window.
  *  - If unclear, asks "Prayer request-a, Offering-a, illa Joining-a?
  *    1 / 2 / 3" (the "3" option appears only once the joining template
  *    file exists) and answers "1" with the prayer image, "2" with the
@@ -68,7 +72,12 @@ const WHISPER_MODEL = process.env.WHISPER_MODEL || 'tiny';
 const LOG_DIR = path.join(__dirname, 'logs');
 const LOG_FILE = path.join(LOG_DIR, 'replies.log');
 const PENDING_FILE = path.join(__dirname, 'pending.json');
+const REPLIES_FILE = path.join(__dirname, 'pending-replies.json');
 const DRY_RUN = process.env.DRY_RUN === '1' || !PHONE_NUMBER_ID || !ACCESS_TOKEN;
+// Reply delay: the auto-reply goes out this long AFTER the member messages,
+// not immediately (Sujitha, 2026-11-21 — "two hours"). Change with
+// REPLY_DELAY_HOURS. Well inside WhatsApp's 24-hour service window.
+const REPLY_DELAY_MS = (parseFloat(process.env.REPLY_DELAY_HOURS || '2') || 2) * 3600000;
 
 const CLARIFY_TEXT_2 =
   'Prayer request-a, illa Offering-a? 1 nu anupunga prayer ku, 2 nu anupunga offering ku.';
@@ -92,6 +101,18 @@ const TEMPLATES = {
   joining: path.join(TEMPLATES_DIR, 'joining-welcome.jpg'),
 };
 
+// Ekkala Thoni WhatsApp group joining link — sent with the joining reply
+// as a real BUTTON ("Ekkala Thoni Link") the member taps to join.
+// Change it with the JOINING_LINK env var; the default is the group's
+// invite link from the slot website ("Join Ekkala Thoni Group").
+const JOINING_LINK = process.env.JOINING_LINK || 'https://chat.whatsapp.com/F0mUV4iwdgjIRQO2MzymTO';
+const JOINING_TEXT = `எக்காள தொனி குரூப்பில் சேர, இந்த link-ஐ தொடவும்:\n${JOINING_LINK}`;
+// Body text for the joining BUTTON message (image header + button). Wrapped
+// in *...* so WhatsApp renders it BOLD. Names the button explicitly, so
+// members know exactly what to tap (Sujitha, 2026-11-21).
+const JOINING_BODY = '*எக்காள தொனி குரூப்பில் சேர, கீழே உள்ள \'EKKALA THONI LINK\' என்கிற button-ஐ தொடவும்.*';
+const JOINING_BUTTON_LABEL = 'EKKALA THONI LINK'; // max 20 chars (17) — ALL CAPS so it looks bigger and bolder
+
 fs.mkdirSync(LOG_DIR, { recursive: true });
 
 // ---- logging ----
@@ -101,7 +122,83 @@ function log(entry) {
   console.log(line);
 }
 
-// ---- pending clarification state (survives restarts) ----
+// ---- delayed reply queue (survives restarts) ----
+// Replies wait REPLY_DELAY_MS after the member's message before going out.
+// The queue is a JSON file, so a pending reply survives a server restart:
+// on startup, due replies are picked up and sent by the timer below.
+function loadReplies() {
+  try { const a = JSON.parse(fs.readFileSync(REPLIES_FILE, 'utf8')); return Array.isArray(a) ? a : []; } catch { return []; }
+}
+function saveReplies(list) {
+  fs.writeFileSync(REPLIES_FILE, JSON.stringify(list, null, 2));
+}
+// Queue a template reply for `to`, due after the delay. If the same person
+// already has the same kind pending, move it to the latest message's time
+// (so repeated messages don't pile up into several replies).
+function queueReply(to, kind, via) {
+  const list = loadReplies();
+  const sendAt = Date.now() + REPLY_DELAY_MS;
+  const existing = list.find((r) => r.to === to && r.kind === kind);
+  if (existing) { existing.sendAt = sendAt; existing.via = via; }
+  else list.push({ to, kind, via, sendAt });
+  saveReplies(list);
+  log({ event: 'reply_queued', to, kind, via, sendAt: new Date(sendAt).toISOString(), delayHours: REPLY_DELAY_MS / 3600000 });
+}
+// Queue the clarification question the same way.
+function queueClarify(to, text, reason) {
+  const list = loadReplies();
+  const sendAt = Date.now() + REPLY_DELAY_MS;
+  const existing = list.find((r) => r.to === to && r.kind === 'clarify');
+  if (existing) { existing.sendAt = sendAt; existing.text = text; }
+  else list.push({ to, kind: 'clarify', text, reason, sendAt });
+  saveReplies(list);
+  log({ event: 'clarify_queued', to, sendAt: new Date(sendAt).toISOString(), delayHours: REPLY_DELAY_MS / 3600000 });
+}
+// Send every reply whose time has come. Runs on a timer (see bottom).
+async function processDueReplies() {
+  const list = loadReplies();
+  const now = Date.now();
+  const due = list.filter((r) => r.sendAt <= now);
+  if (!due.length) return;
+  const remaining = list.filter((r) => r.sendAt > now);
+  saveReplies(remaining);
+  for (const r of due) {
+    try {
+      if (r.kind === 'clarify') {
+        if (DRY_RUN) log({ event: 'dry_run_send_text', to: r.to, text: r.text, reason: r.reason });
+        else {
+          const id = await sendText(r.to, r.text);
+          log({ event: 'clarify_sent', to: r.to, messageId: id, reason: r.reason });
+        }
+      } else {
+        await replyWithTemplate(r.to, r.kind, r.via);
+      }
+    } catch (e) {
+      log({ event: 'queued_reply_error', to: r.to, kind: r.kind, error: String(e).slice(0, 300) });
+    }
+  }
+}
+
+// ---- excluded senders (never auto-replied) ----
+// Some people only FORWARD other members' offering screenshots in bulk
+// (e.g. the sister who collects Google Pay receipts and sends 5-6 at a
+// time) — they are not offering themselves, so they must get NO reply.
+// List their WhatsApp numbers (wa_id, country code, no + or spaces) in
+// excluded.json (an array, e.g. ["919876543210"]) and/or in the
+// EXCLUDED_NUMBERS env var (comma-separated). Sujitha, 2026-11-21.
+const EXCLUDED_FILE = path.join(__dirname, 'excluded.json');
+function loadExcluded() {
+  const set = new Set();
+  try {
+    const arr = JSON.parse(fs.readFileSync(EXCLUDED_FILE, 'utf8'));
+    if (Array.isArray(arr)) for (const n of arr) set.add(String(n).replace(/\D/g, ''));
+  } catch { /* no file yet — fine */ }
+  for (const n of (process.env.EXCLUDED_NUMBERS || '').split(',')) {
+    const d = n.replace(/\D/g, '');
+    if (d) set.add(d);
+  }
+  return set;
+}
 function loadPending() {
   try { return JSON.parse(fs.readFileSync(PENDING_FILE, 'utf8')); } catch { return {}; }
 }
@@ -132,8 +229,10 @@ async function uploadImage(imagePath) {
   return body.id; // media id
 }
 
-async function sendImage(to, imagePath) {
+async function sendImage(to, imagePath, caption) {
   const mediaId = await uploadImage(imagePath);
+  const image = { id: mediaId };
+  if (caption) image.caption = caption;
   const body = await graphJson(
     `${GRAPH}/${PHONE_NUMBER_ID}/messages`,
     {
@@ -144,7 +243,7 @@ async function sendImage(to, imagePath) {
         recipient_type: 'individual',
         to,
         type: 'image',
-        image: { id: mediaId },
+        image,
       }),
     }
   );
@@ -196,6 +295,62 @@ function transcribeAudio(filePath) {
   });
 }
 
+// Payment keywords for the OCR check on receipt screenshots. A Google Pay
+// receipt shows these words / symbols; a random photo does not.
+const PAYMENT_WORDS = [
+  'google pay', 'gpay', 'phonepe', 'paytm', 'bhim', 'upi',
+  'paid', 'payment', 'sent', 'transaction', 'successful', 'success',
+  'receipt', 'rs', 'rs.', 'inr', 'rupees', '₹', 'amount',
+];
+// Read the text out of an image (tesseract OCR) and say whether it looks
+// like a payment receipt. Returns '' on any failure (treated as not a receipt).
+function ocrImage(filePath) {
+  return new Promise((resolve) => {
+    execFile('tesseract', [filePath, 'stdout', '--psm', '6'],
+      { timeout: 60000, maxBuffer: 1024 * 1024 },
+      (err, stdout) => {
+        if (err) { log({ event: 'ocr_error', error: String(err).slice(0, 200) }); return resolve(''); }
+        resolve((stdout || '').trim());
+      });
+  });
+}
+function looksLikePaymentReceipt(ocrText) {
+  const t = (ocrText || '').toLowerCase();
+  return PAYMENT_WORDS.some((w) => t.includes(w));
+}
+
+// Joining reply as ONE interactive message: the welcome image on top and a
+// real "Ekkala Thoni Link" BUTTON below it. Tapping the button opens the
+// group invite link, so the member joins the group. This is a free-form
+// interactive (cta_url) message — it needs NO template approval, it works
+// inside the 24-hour window after the member messaged first.
+async function sendJoiningButton(to) {
+  const mediaId = await uploadImage(TEMPLATES.joining);
+  const body = await graphJson(
+    `${GRAPH}/${PHONE_NUMBER_ID}/messages`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to,
+        type: 'interactive',
+        interactive: {
+          type: 'cta_url',
+          header: { type: 'image', image: { id: mediaId } },
+          body: { text: JOINING_BODY },
+          action: {
+            name: 'cta_url',
+            parameters: { display_text: JOINING_BUTTON_LABEL, url: JOINING_LINK },
+          },
+        },
+      }),
+    }
+  );
+  return body.messages && body.messages[0] ? body.messages[0].id : JSON.stringify(body);
+}
+
 // ---- message handling ----
 async function replyWithTemplate(to, kind, via) {
   const imagePath = TEMPLATES[kind];
@@ -207,8 +362,21 @@ async function replyWithTemplate(to, kind, via) {
     log({ event: 'dry_run_send', to, kind, imagePath, via });
     return { sent: false, dryRun: true, kind };
   }
-  const messageId = await sendImage(to, imagePath);
-  log({ event: 'reply_sent', to, kind, imagePath, messageId, via });
+  if (kind === 'joining') {
+    // Try the button message first. If it fails for any reason, fall back
+    // to the image + link caption, so the member still gets the reply.
+    try {
+      const messageId = await sendJoiningButton(to);
+      log({ event: 'reply_sent', to, kind, imagePath, messageId, via, button: true });
+      return { sent: true, kind, messageId };
+    } catch (err) {
+      log({ event: 'joining_button_failed', to, error: String(err).slice(0, 300) });
+    }
+  }
+  // Prayer / offering, or joining fallback: image (+ link caption for joining).
+  const caption = kind === 'joining' ? JOINING_TEXT : undefined;
+  const messageId = await sendImage(to, imagePath, caption);
+  log({ event: 'reply_sent', to, kind, imagePath, messageId, via, caption: !!caption });
   return { sent: true, kind, messageId };
 }
 
@@ -217,6 +385,10 @@ async function handleMessage(msg) {
   const messageId = msg.id;
   const type = msg.type;
 
+  // Excluded senders are handled in the image branch below (screenshots
+  // only) — NOT here. A sister on the list still gets normal replies for
+  // prayer requests, joining and her own offering texts; only the bulk
+  // forwarded Google Pay receipt screenshots get no reply.
   let text = '';
   let source = type;
 
@@ -238,6 +410,49 @@ async function handleMessage(msg) {
         text = '';
       }
     }
+  } else if (type === 'image') {
+    // Photo message. A Google Pay receipt screenshot = offering proof
+    // (Sujitha, 2026-11-21) and gets the offering template. A random photo
+    // (a friend's photo, a snapshot, anything shared) gets NO reply.
+    // How we tell them apart: if the image has a caption, classify it;
+    // otherwise read the image with OCR and look for payment words
+    // (Google Pay / Paid / UPI / ₹ / ...). No payment words = random photo.
+    //
+    // EXCEPTION — bulk forwarders (Sujitha, 2026-11-21): the sister who
+    // collects OTHER members' Google Pay receipts and forwards 5-6 at a
+    // time is on the excluded list. Her SCREENSHOTS get NO reply at all.
+    // But if the same sister sends a prayer request, a joining request or
+    // her own offering text/voice, she DOES get the normal template.
+    if (loadExcluded().has(String(from).replace(/\D/g, ''))) {
+      log({ event: 'excluded_sender', from, messageId, type, note: 'bulk screenshot forwarder — screenshots get no reply' });
+      return;
+    }
+    const caption = (msg.image && msg.image.caption) || '';
+    if (caption.trim()) {
+      text = caption;
+      source = 'image caption';
+    } else if (DRY_RUN) {
+      // No credentials: can't download the image to OCR it. Log it and
+      // treat it as offering (the common case) so dry-run tests still flow.
+      log({ event: 'incoming', from, messageId, source: 'image (no caption, dry-run) -> offering', text: '' });
+      queueReply(from, 'offering', 'google-pay receipt screenshot (dry-run)');
+      return;
+    } else {
+      try {
+        const file = await downloadMedia(msg.image.id);
+        const ocrText = await ocrImage(file);
+        try { fs.unlinkSync(file); } catch { /* ignore */ }
+        if (looksLikePaymentReceipt(ocrText)) {
+          log({ event: 'incoming', from, messageId, source: 'image OCR -> payment receipt -> offering', text: ocrText.slice(0, 200) });
+          queueReply(from, 'offering', 'google-pay receipt screenshot');
+        } else {
+          log({ event: 'image_ignored', from, messageId, reason: 'no payment words in OCR text — random photo, no reply', ocrText: ocrText.slice(0, 200) });
+        }
+      } catch (e) {
+        log({ event: 'image_error', from, messageId, error: String(e).slice(0, 300) });
+      }
+      return;
+    }
   } else {
     log({ event: 'ignored_type', from, messageId, type });
     return;
@@ -257,7 +472,7 @@ async function handleMessage(msg) {
       log({ event: 'joining_no_template', from, messageId, note: 'member answered 3 but no joining template file yet' });
       return;
     }
-    await replyWithTemplate(from, kind, 'clarification-answer');
+    queueReply(from, kind, 'clarification-answer');
     return;
   }
 
@@ -269,24 +484,14 @@ async function handleMessage(msg) {
       log({ event: 'joining_no_template', from, messageId, text: text.slice(0, 200), reason: result.reason });
       return;
     }
-    await replyWithTemplate(from, result.kind, result.reason);
+    queueReply(from, result.kind, result.reason);
     return;
   }
 
   // Unclear (including empty transcription): ask which one it is.
   pending[from] = { askedAt: new Date().toISOString(), text: text.slice(0, 200) };
   savePending(pending);
-  const clarify = clarifyText();
-  if (DRY_RUN) {
-    log({ event: 'dry_run_send_text', to: from, text: clarify, reason: result.reason });
-  } else {
-    try {
-      const id = await sendText(from, clarify);
-      log({ event: 'clarify_sent', to: from, messageId: id, reason: result.reason });
-    } catch (e) {
-      log({ event: 'clarify_error', to: from, error: String(e).slice(0, 300) });
-    }
-  }
+  queueClarify(from, clarifyText(), result.reason);
 }
 
 // ---- HTTP server ----
@@ -336,6 +541,8 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({
       ok: true,
       dryRun: DRY_RUN,
+      replyDelayHours: REPLY_DELAY_MS / 3600000,
+      pendingReplies: loadReplies().length,
       templates: {
         prayer: fs.existsSync(TEMPLATES.prayer),
         offering: fs.existsSync(TEMPLATES.offering),
@@ -354,9 +561,15 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, () => {
   console.log(`Ekkala Thoni WhatsApp auto-reply listening on port ${PORT}`);
   console.log(`DRY_RUN=${DRY_RUN} (no Meta credentials => classify + log only)`);
+  console.log(`Reply delay: ${REPLY_DELAY_MS / 3600000} hours after the member messages (change with REPLY_DELAY_HOURS)`);
   console.log(`Templates: prayer=${TEMPLATES.prayer} (${fs.existsSync(TEMPLATES.prayer) ? 'found' : 'MISSING'})`);
   console.log(`           offering=${TEMPLATES.offering} (${fs.existsSync(TEMPLATES.offering) ? 'found' : 'MISSING'})`);
   console.log(`           joining=${TEMPLATES.joining} (${fs.existsSync(TEMPLATES.joining) ? 'found' : 'NOT SENT YET — joining messages will be logged, not auto-replied'})`);
   console.log(`Verify token: ${VERIFY_TOKEN === 'ekkala-thoni-verify' ? 'DEFAULT — set WHATSAPP_VERIFY_TOKEN in .env' : 'set'}`);
   console.log(`Log file: ${LOG_FILE}`);
 });
+
+// Every 30 seconds, send any queued reply whose 2-hour wait is over.
+// Also runs once at startup, so replies queued before a restart still go out.
+setInterval(() => { processDueReplies().catch((e) => log({ event: 'queue_timer_error', error: String(e).slice(0, 200) })); }, 30000);
+processDueReplies().catch((e) => log({ event: 'queue_startup_error', error: String(e).slice(0, 200) }));
