@@ -199,6 +199,27 @@ function loadExcluded() {
   }
   return set;
 }
+
+// ---- fully excluded senders (NO reply to ANY message) ----
+// A second, stricter list (Sujitha, 2026-11-22): some senders get NO
+// auto-reply at all, whatever they send — text, voice, photo, anything.
+// Their numbers go in excluded-full.json (same wa_id format) and/or in
+// the EXCLUDED_FULL_NUMBERS env var (comma-separated). Unlike the
+// screenshot-only list above, this is checked at the top of
+// handleMessage, before any classification or transcription happens.
+const EXCLUDED_FULL_FILE = path.join(__dirname, 'excluded-full.json');
+function loadExcludedFull() {
+  const set = new Set();
+  try {
+    const arr = JSON.parse(fs.readFileSync(EXCLUDED_FULL_FILE, 'utf8'));
+    if (Array.isArray(arr)) for (const n of arr) set.add(String(n).replace(/\D/g, ''));
+  } catch { /* no file yet — fine */ }
+  for (const n of (process.env.EXCLUDED_FULL_NUMBERS || '').split(',')) {
+    const d = n.replace(/\D/g, '');
+    if (d) set.add(d);
+  }
+  return set;
+}
 function loadPending() {
   try { return JSON.parse(fs.readFileSync(PENDING_FILE, 'utf8')); } catch { return {}; }
 }
@@ -385,8 +406,16 @@ async function handleMessage(msg) {
   const messageId = msg.id;
   const type = msg.type;
 
-  // Excluded senders are handled in the image branch below (screenshots
-  // only) — NOT here. A sister on the list still gets normal replies for
+  // FULL exclusion (Sujitha, 2026-11-22): numbers on this list get NO
+  // reply to ANY message — text, voice, photo, anything. Checked first,
+  // before any classification, transcription or OCR.
+  if (loadExcludedFull().has(String(from).replace(/\D/g, ''))) {
+    log({ event: 'excluded_full_sender', from, messageId, type, note: 'fully excluded — no reply to any message' });
+    return;
+  }
+
+  // The screenshot-only excluded senders are handled in the image branch
+  // below — NOT here. A sister on that list still gets normal replies for
   // prayer requests, joining and her own offering texts; only the bulk
   // forwarded Google Pay receipt screenshots get no reply.
   let text = '';
