@@ -126,6 +126,10 @@ const TEMPLATES = {
   // தினத்திற்காக ஸ்லாட்டுகளை Book செய்யுங்கள்! ஊழியங்களை செய்து
   // ஆசீர்வாதத்தை சுலபமாக பெற்றுக்கொள்ளுங்க!"
   slot: path.join(TEMPLATES_DIR, 'slot-booking.jpg'),
+  // Zoom meeting template (Sujitha, 2026-11-25): dark-orange starry, same
+  // style as the other templates. Sent as an image FIRST, then the Zoom
+  // link + passcode as TEXT below it (the passcode must stay visible).
+  zoom: path.join(TEMPLATES_DIR, 'zoom-meeting.jpg'),
 };
 
 // Ekkala Thoni WhatsApp group joining link — sent with the joining reply
@@ -145,7 +149,9 @@ const JOINING_BUTTON_LABEL = 'EKKALA THONI LINK'; // max 20 chars (17) — ALL C
 // so the member can tap it straight into the meeting. It stays TEXT (not a
 // button) because the passcode must be visible as text.
 const ZOOM_TEXT = 'ஜெபக்கூடுகையில் கலந்துகொள்ள Zoom link:\nhttps://zoom.us/j/7101504678\nPasscode: 123';
-const TEXT_REPLY_KINDS = { zoom: ZOOM_TEXT };
+// Zoom now sends its template image + this text (sendZoomReply below), so
+// TEXT_REPLY_KINDS is empty for now; kept for any future text-only kind.
+const TEXT_REPLY_KINDS = {};
 
 // ---- slot reply as a BUTTON (Sujitha, 2026-11-25) ----
 // Option 5 (slot booking): NOT plain text — a real tappable BUTTON, like the
@@ -221,8 +227,16 @@ async function processDueReplies() {
           const id = await sendSlotButton(r.to);
           log({ event: 'slot_button_sent', to: r.to, messageId: id, via: r.via });
         }
+      } else if (r.kind === 'zoom') {
+        // Zoom: template image FIRST, then the Zoom link + passcode as TEXT
+        // below it (the passcode must stay visible as text, Sujitha 2026-11-25).
+        if (DRY_RUN) log({ event: 'dry_run_send_zoom', to: r.to, image: TEMPLATES.zoom, text: ZOOM_TEXT });
+        else {
+          const id = await sendZoomReply(r.to);
+          log({ event: 'zoom_reply_sent', to: r.to, messageId: id, via: r.via });
+        }
       } else if (TEXT_REPLY_KINDS[r.kind]) {
-        // zoom: a plain TEXT reply (link), not a template image.
+        // plain TEXT reply (link), not a template image.
         if (DRY_RUN) log({ event: 'dry_run_send_text', to: r.to, kind: r.kind, text: TEXT_REPLY_KINDS[r.kind] });
         else {
           const id = await sendText(r.to, TEXT_REPLY_KINDS[r.kind]);
@@ -489,6 +503,19 @@ async function sendSlotButton(to) {
     }
   );
   return body.messages && body.messages[0] ? body.messages[0].id : JSON.stringify(body);
+}
+
+// Zoom reply: template image FIRST, then the Zoom link + passcode as TEXT.
+// The passcode must stay visible as text, so it is NOT inside the image.
+// If the image is missing, fall back to the text alone.
+async function sendZoomReply(to) {
+  if (!fs.existsSync(TEMPLATES.zoom)) {
+    log({ event: 'template_missing', kind: 'zoom', imagePath: TEMPLATES.zoom });
+    return await sendText(to, ZOOM_TEXT);
+  }
+  const imageId = await sendImage(to, TEMPLATES.zoom);
+  const textId = await sendText(to, ZOOM_TEXT);
+  return textId || imageId;
 }
 
 // ---- message handling ----
