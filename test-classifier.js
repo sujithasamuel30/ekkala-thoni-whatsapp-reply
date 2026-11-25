@@ -37,13 +37,27 @@ const SAMPLES = [
   ['Please add me in the Ekkala Thoni group', 'joining'],
   // Joining must NOT steal prayer/offering messages
   ['I got a new job, please pray for me', 'prayer'],
-  ['Can I join the prayer meeting?', 'prayer'],
+  ['Can I join the prayer meeting?', 'zoom'],
   ['சேர்ந்து ஜெபிக்கலாம்', 'prayer'],
   ['I am a member of the group', 'unclear'],
+  // Zoom — wants the prayer-meeting link (option 4)
+  ['Zoom link please', 'zoom'],
+  ['I want to join the prayer meeting', 'zoom'],
+  ['ஜெபக்கூடுகையில் கலந்துகொள்ள விரும்புகிறேன்', 'zoom'],
+  ['meeting link', 'zoom'],
+  // Slot — wants to book a ministry slot (option 5)
+  ['I want to book a slot', 'slot'],
+  ['slot book panna virumburen', 'slot'],
+  ['ஸ்லாட் புக் பண்ண விரும்புகிறேன்', 'slot'],
+  ['Bible reading slot', 'slot'],
+  // Zoom/slot must NOT steal prayer requests
+  ['Please pray for the prayer meeting', 'prayer'],
   // Clarification answers
   ['1', 'choice-1'],
   ['2', 'choice-2'],
   ['3', 'choice-3'],
+  ['4', 'choice-4'],
+  ['5', 'choice-5'],
   // Unclear
   ['Hello', 'unclear'],
   ['Vanakkam', 'unclear'],
@@ -64,10 +78,14 @@ for (const [text, expected] of SAMPLES) {
   if (ok) pass++; else fail++;
   const action = got.kind === 'prayer' || got.kind === 'offering' || got.kind === 'joining'
     ? `send ${TEMPLATE[got.kind]}`
+    : got.kind === 'zoom' ? 'send Zoom link text (option 4)'
+    : got.kind === 'slot' ? 'send slot website link text (option 5)'
     : got.kind === 'choice-1' ? 'send prayer-request.jpg (answered 1)'
     : got.kind === 'choice-2' ? 'send offering-thanks.jpg (answered 2)'
     : got.kind === 'choice-3' ? 'send joining-welcome.jpg (answered 3)'
-    : 'ask clarification (Prayer / Offering / Joining? 1 / 2 / 3)';
+    : got.kind === 'choice-4' ? 'send Zoom link text (answered 4)'
+    : got.kind === 'choice-5' ? 'send slot website link text (answered 5)'
+    : 'send clarification LIST (6 options to tap)';
   console.log(`${ok ? 'PASS' : 'FAIL'}  [${JSON.stringify(text)}] -> ${got.kind} (expected ${expected}) — ${action} — ${got.reason}`);
 }
 console.log(`\n${pass} passed, ${fail} failed out of ${SAMPLES.length} samples.`);
