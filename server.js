@@ -134,14 +134,20 @@ const JOINING_TEXT = `எக்காள தொனி குரூப்பி�
 const JOINING_BODY = '*எக்காள தொனி குரூப்பில் சேர, கீழே உள்ள \'EKKALA THONI LINK\' என்கிற button-ஐ தொடவும்.*';
 const JOINING_BUTTON_LABEL = 'EKKALA THONI LINK'; // max 20 chars (17) — ALL CAPS so it looks bigger and bolder
 
-// ---- text replies (no image) for the prayer-meeting and slot options ----
+// ---- text reply (no image) for the prayer-meeting option ----
 // Option 4 (prayer meeting): the Zoom link as tappable TEXT, not an image,
-// so the member can tap it straight into the meeting. Option 5 (slot
-// booking): the slot website link as tappable TEXT. Both use the same
-// Zoom ID / slot link Sujitha shares in the group.
+// so the member can tap it straight into the meeting. It stays TEXT (not a
+// button) because the passcode must be visible as text.
 const ZOOM_TEXT = 'ஜெபக்கூடுகையில் கலந்துகொள்ள Zoom link:\nhttps://zoom.us/j/7101504678\nPasscode: 123';
-const SLOT_TEXT = 'ஊழியங்களை செய்ய ஸ்லாட் புக் பண்ண இந்த link-ஐ touch செய்யவும்:\nhttps://ekkala-thoni-slots.tiiny.site';
-const TEXT_REPLY_KINDS = { zoom: ZOOM_TEXT, slot: SLOT_TEXT };
+const TEXT_REPLY_KINDS = { zoom: ZOOM_TEXT };
+
+// ---- slot reply as a BUTTON (Sujitha, 2026-11-25) ----
+// Option 5 (slot booking): NOT plain text — a real tappable BUTTON, like the
+// joining "EKKALA THONI LINK" button. The body names the button; tapping it
+// opens the slot website. No link printed in the text.
+const SLOT_LINK = 'https://ekkala-thoni-slots.tiiny.site';
+const SLOT_BUTTON_LABEL = 'ஸ்லாட் புக் பண்ண'; // max 20 chars (16)
+const SLOT_BODY = 'ஊழியங்களை செய்ய ஸ்லாட் புக் பண்ண கீழே உள்ள button-ஐ touch செய்யவும்.';
 
 fs.mkdirSync(LOG_DIR, { recursive: true });
 
@@ -202,8 +208,15 @@ async function processDueReplies() {
           const id = await sendClarifyList(r.to);
           log({ event: 'clarify_sent', to: r.to, messageId: id, reason: r.reason, list: true });
         }
+      } else if (r.kind === 'slot') {
+        // Slot: a BUTTON reply (cta_url), not plain text (Sujitha, 2026-11-25).
+        if (DRY_RUN) log({ event: 'dry_run_send_slot_button', to: r.to, body: SLOT_BODY, button: SLOT_BUTTON_LABEL, url: SLOT_LINK });
+        else {
+          const id = await sendSlotButton(r.to);
+          log({ event: 'slot_button_sent', to: r.to, messageId: id, via: r.via });
+        }
       } else if (TEXT_REPLY_KINDS[r.kind]) {
-        // zoom / slot: a plain TEXT reply (link), not a template image.
+        // zoom: a plain TEXT reply (link), not a template image.
         if (DRY_RUN) log({ event: 'dry_run_send_text', to: r.to, kind: r.kind, text: TEXT_REPLY_KINDS[r.kind] });
         else {
           const id = await sendText(r.to, TEXT_REPLY_KINDS[r.kind]);
@@ -432,6 +445,35 @@ async function sendClarifyList(to) {
           action: {
             button: CLARIFY_BUTTON,
             sections: [{ title: 'தேர்வு', rows: CLARIFY_ROWS }],
+          },
+        },
+      }),
+    }
+  );
+  return body.messages && body.messages[0] ? body.messages[0].id : JSON.stringify(body);
+}
+
+// Slot reply as ONE interactive message: body text + a real BUTTON below it.
+// Tapping the button opens the slot website, so the member books a slot.
+// This is a free-form interactive (cta_url) message — it needs NO template
+// approval, it works inside the 24-hour window after the member messaged first.
+async function sendSlotButton(to) {
+  const body = await graphJson(
+    `${GRAPH}/${PHONE_NUMBER_ID}/messages`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to,
+        type: 'interactive',
+        interactive: {
+          type: 'cta_url',
+          body: { text: SLOT_BODY },
+          action: {
+            name: 'cta_url',
+            parameters: { display_text: SLOT_BUTTON_LABEL, url: SLOT_LINK },
           },
         },
       }),
