@@ -120,6 +120,12 @@ const TEMPLATES = {
   // and NOT auto-replied, so Sujitha can reply manually. The welcome
   // wording is never invented here.
   joining: path.join(TEMPLATES_DIR, 'joining-welcome.jpg'),
+  // Slot booking template (Sujitha, 2026-11-25): dark-blue starry, same style
+  // as the joining image. Text: "ஒவ்வொரு நாளும் வீட்டில் இருந்தபடியே
+  // கர்த்தரோடு கூட சிறிது நேரம் செலவிட விரும்புகிறீர்களா? வாங்க! நாளைய
+  // தினத்திற்காக ஸ்லாட்டுகளை Book செய்யுங்கள்! ஊழியங்களை செய்து
+  // ஆசீர்வாதத்தை சுலபமாக பெற்றுக்கொள்ளுங்க!"
+  slot: path.join(TEMPLATES_DIR, 'slot-booking.jpg'),
 };
 
 // Ekkala Thoni WhatsApp group joining link — sent with the joining reply
@@ -453,11 +459,13 @@ async function sendClarifyList(to) {
   return body.messages && body.messages[0] ? body.messages[0].id : JSON.stringify(body);
 }
 
-// Slot reply as ONE interactive message: body text + a real BUTTON below it.
-// Tapping the button opens the slot website, so the member books a slot.
+// Slot reply as ONE interactive message: the slot image on top, body text,
+// and a real BUTTON below it. Tapping the button opens the slot website,
+// so the member books a slot.
 // This is a free-form interactive (cta_url) message — it needs NO template
 // approval, it works inside the 24-hour window after the member messaged first.
 async function sendSlotButton(to) {
+  const mediaId = await uploadImage(TEMPLATES.slot);
   const body = await graphJson(
     `${GRAPH}/${PHONE_NUMBER_ID}/messages`,
     {
@@ -470,6 +478,7 @@ async function sendSlotButton(to) {
         type: 'interactive',
         interactive: {
           type: 'cta_url',
+          header: { type: 'image', image: { id: mediaId } },
           body: { text: SLOT_BODY },
           action: {
             name: 'cta_url',
