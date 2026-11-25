@@ -79,16 +79,33 @@ const DRY_RUN = process.env.DRY_RUN === '1' || !PHONE_NUMBER_ID || !ACCESS_TOKEN
 // REPLY_DELAY_HOURS. Well inside WhatsApp's 24-hour service window.
 const REPLY_DELAY_MS = (parseFloat(process.env.REPLY_DELAY_HOURS || '2') || 2) * 3600000;
 
-const CLARIFY_TEXT_2 =
-  'Prayer request-a, illa Offering-a? 1 nu anupunga prayer ku, 2 nu anupunga offering ku.';
-const CLARIFY_TEXT_3 =
-  'Prayer request-a, Offering-a, illa Joining-a? 1 nu anupunga prayer ku, 2 nu anupunga offering ku, 3 nu anupunga joining ku.';
-
-// The clarification question offers "3" for joining only when the joining
-// template file exists. Until Sujitha sends it, the question stays 1 / 2.
-function clarifyText() {
-  return fs.existsSync(TEMPLATES.joining) ? CLARIFY_TEXT_3 : CLARIFY_TEXT_2;
-}
+// ---- clarification as a LIST message (Sujitha, 2026-11-25) ----
+// Instead of asking the member to TYPE 1-5, send an interactive LIST:
+// one "தேர்வு செய்யவும்" button that opens a list of options; the member
+// taps one and the matching reply goes out. WhatsApp allows at most 10
+// rows in one list; we have 6. The row id comes back as the member's
+// answer (see handleMessage). Row 6 ('prayer-confirm') is a SEPARATE
+// option — "is what you sent a prayer request?" — but it maps to the
+// same prayer reply as row 1. Sujitha's own wording, 2026-11-25.
+const CLARIFY_BODY = 'நீங்கள் எதைப் பற்றி கேட்கிறீர்கள்? (கன்ஃபார்ம் செய்யுங்கள்)';
+const CLARIFY_BUTTON = 'தேர்வு செய்யவும்';
+const CLARIFY_ROWS = [
+  { id: 'prayer', title: 'ஜெப குறிப்பு', description: 'ஜெப குறிப்பு அனுப்ப' },
+  { id: 'offering', title: 'காணிக்கை', description: 'காணிக்கை (offering) பற்றிய விவரம் அறிய.' },
+  { id: 'joining', title: 'குரூப்பில் சேர', description: 'புதிதாக குரூப்பில் சேர' },
+  { id: 'zoom', title: 'ஜெபக்கூடுகை', description: 'ஜெபக்கூடுகையில் கலந்து கொள்ள' },
+  { id: 'slot', title: 'ஸ்லாட் புக்', description: 'ஊழியங்களை செய்ய ஸ்லாட் புக் பண்ண' },
+  { id: 'prayer-confirm', title: 'ஜெபக்குறிப்பா?', description: 'நீங்கள் அனுப்பி உள்ளது ஜெபக்குறிப்பா?' },
+];
+// Row id -> reply kind. 'prayer-confirm' maps to prayer (same reply as row 1).
+const CLARIFY_ID_TO_KIND = {
+  prayer: 'prayer',
+  offering: 'offering',
+  joining: 'joining',
+  zoom: 'zoom',
+  slot: 'slot',
+  'prayer-confirm': 'prayer',
+};
 
 const TEMPLATES = {
   prayer: path.join(TEMPLATES_DIR, 'prayer-request.jpg'),
@@ -112,6 +129,15 @@ const JOINING_TEXT = `எக்காள தொனி குரூப்பி�
 // members know exactly what to tap (Sujitha, 2026-11-21).
 const JOINING_BODY = '*எக்காள தொனி குரூப்பில் சேர, கீழே உள்ள \'EKKALA THONI LINK\' என்கிற button-ஐ தொடவும்.*';
 const JOINING_BUTTON_LABEL = 'EKKALA THONI LINK'; // max 20 chars (17) — ALL CAPS so it looks bigger and bolder
+
+// ---- text replies (no image) for the prayer-meeting and slot options ----
+// Option 4 (prayer meeting): the Zoom link as tappable TEXT, not an image,
+// so the member can tap it straight into the meeting. Option 5 (slot
+// booking): the slot website link as tappable TEXT. Both use the same
+// Zoom ID / slot link Sujitha shares in the group.
+const ZOOM_TEXT = 'ஜெபக்கூடுகையில் கலந்துகொள்ள Zoom link:\nhttps://zoom.us/j/7101504678\nPasscode: 123';
+const SLOT_TEXT = 'ஊழியங்களை செய்ய ஸ்லாட் புக் பண்ண இந்த link-ஐ touch செய்யவும்:\nhttps://ekkala-thoni-slots.tiiny.site';
+const TEXT_REPLY_KINDS = { zoom: ZOOM_TEXT, slot: SLOT_TEXT };
 
 fs.mkdirSync(LOG_DIR, { recursive: true });
 
@@ -144,13 +170,14 @@ function queueReply(to, kind, via) {
   saveReplies(list);
   log({ event: 'reply_queued', to, kind, via, sendAt: new Date(sendAt).toISOString(), delayHours: REPLY_DELAY_MS / 3600000 });
 }
-// Queue the clarification question the same way.
-function queueClarify(to, text, reason) {
+// Queue the clarification LIST the same way. The list content is fixed
+// (CLARIFY_ROWS), so no text is stored — only the kind and reason.
+function queueClarify(to, reason) {
   const list = loadReplies();
   const sendAt = Date.now() + REPLY_DELAY_MS;
   const existing = list.find((r) => r.to === to && r.kind === 'clarify');
-  if (existing) { existing.sendAt = sendAt; existing.text = text; }
-  else list.push({ to, kind: 'clarify', text, reason, sendAt });
+  if (existing) { existing.sendAt = sendAt; }
+  else list.push({ to, kind: 'clarify', reason, sendAt });
   saveReplies(list);
   log({ event: 'clarify_queued', to, sendAt: new Date(sendAt).toISOString(), delayHours: REPLY_DELAY_MS / 3600000 });
 }
@@ -165,10 +192,18 @@ async function processDueReplies() {
   for (const r of due) {
     try {
       if (r.kind === 'clarify') {
-        if (DRY_RUN) log({ event: 'dry_run_send_text', to: r.to, text: r.text, reason: r.reason });
+        // Clarification goes out as an interactive LIST, not plain text.
+        if (DRY_RUN) log({ event: 'dry_run_send_list', to: r.to, body: CLARIFY_BODY, rows: CLARIFY_ROWS.map((x) => x.id), reason: r.reason });
         else {
-          const id = await sendText(r.to, r.text);
-          log({ event: 'clarify_sent', to: r.to, messageId: id, reason: r.reason });
+          const id = await sendClarifyList(r.to);
+          log({ event: 'clarify_sent', to: r.to, messageId: id, reason: r.reason, list: true });
+        }
+      } else if (TEXT_REPLY_KINDS[r.kind]) {
+        // zoom / slot: a plain TEXT reply (link), not a template image.
+        if (DRY_RUN) log({ event: 'dry_run_send_text', to: r.to, kind: r.kind, text: TEXT_REPLY_KINDS[r.kind] });
+        else {
+          const id = await sendText(r.to, TEXT_REPLY_KINDS[r.kind]);
+          log({ event: 'text_reply_sent', to: r.to, kind: r.kind, messageId: id, via: r.via });
         }
       } else {
         await replyWithTemplate(r.to, r.kind, r.via);
@@ -372,6 +407,35 @@ async function sendJoiningButton(to) {
   return body.messages && body.messages[0] ? body.messages[0].id : JSON.stringify(body);
 }
 
+// Send the clarification as an interactive LIST message. The member taps
+// the "தேர்வு செய்யவும்" button, sees the 6 options, and taps one —
+// no typing needed. This is a free-form interactive message, so it works
+// inside the 24-hour window after the member messaged first.
+async function sendClarifyList(to) {
+  const body = await graphJson(
+    `${GRAPH}/${PHONE_NUMBER_ID}/messages`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to,
+        type: 'interactive',
+        interactive: {
+          type: 'list',
+          body: { text: CLARIFY_BODY },
+          action: {
+            button: CLARIFY_BUTTON,
+            sections: [{ title: 'தேர்வு', rows: CLARIFY_ROWS }],
+          },
+        },
+      }),
+    }
+  );
+  return body.messages && body.messages[0] ? body.messages[0].id : JSON.stringify(body);
+}
+
 // ---- message handling ----
 async function replyWithTemplate(to, kind, via) {
   const imagePath = TEMPLATES[kind];
@@ -418,6 +482,30 @@ async function handleMessage(msg) {
   // below — NOT here. A sister on that list still gets normal replies for
   // prayer requests, joining and her own offering texts; only the bulk
   // forwarded Google Pay receipt screenshots get no reply.
+
+  // Interactive list reply: the member tapped an option in the
+  // clarification LIST. The row id comes back (list_reply.id) — map it
+  // to the reply kind and queue it. No typing or classification needed.
+  if (type === 'interactive') {
+    const inter = msg.interactive || {};
+    const reply = inter.list_reply || inter.button_reply || {};
+    const rowId = reply.id || '';
+    const kind = CLARIFY_ID_TO_KIND[rowId];
+    if (!kind) {
+      log({ event: 'interactive_unknown', from, messageId, rowId, title: reply.title || '' });
+      return;
+    }
+    const pending = loadPending();
+    if (pending[from]) { delete pending[from]; savePending(pending); }
+    if (kind === 'joining' && !fs.existsSync(TEMPLATES.joining)) {
+      log({ event: 'joining_no_template', from, messageId, note: 'member tapped joining in the list but no joining template file yet' });
+      return;
+    }
+    log({ event: 'incoming', from, messageId, source: 'clarification list tap', text: rowId });
+    queueReply(from, kind, 'clarification-list tap: ' + rowId);
+    return;
+  }
+
   let text = '';
   let source = type;
 
@@ -493,8 +581,13 @@ async function handleMessage(msg) {
   const result = classify(text);
 
   // Answer to the clarification question takes priority.
-  if ((result.kind === 'choice-1' || result.kind === 'choice-2' || result.kind === 'choice-3') && pending[from]) {
-    const kind = result.kind === 'choice-1' ? 'prayer' : result.kind === 'choice-2' ? 'offering' : 'joining';
+  // 1 prayer, 2 offering, 3 joining, 4 prayer meeting (Zoom link),
+  // 5 slot booking (slot website link).
+  if ((result.kind === 'choice-1' || result.kind === 'choice-2' || result.kind === 'choice-3' || result.kind === 'choice-4' || result.kind === 'choice-5') && pending[from]) {
+    const kind = result.kind === 'choice-1' ? 'prayer'
+      : result.kind === 'choice-2' ? 'offering'
+      : result.kind === 'choice-3' ? 'joining'
+      : result.kind === 'choice-4' ? 'zoom' : 'slot';
     delete pending[from];
     savePending(pending);
     if (kind === 'joining' && !fs.existsSync(TEMPLATES.joining)) {
@@ -505,7 +598,7 @@ async function handleMessage(msg) {
     return;
   }
 
-  if (result.kind === 'prayer' || result.kind === 'offering' || result.kind === 'joining') {
+  if (result.kind === 'prayer' || result.kind === 'offering' || result.kind === 'joining' || result.kind === 'zoom' || result.kind === 'slot') {
     if (pending[from]) { delete pending[from]; savePending(pending); }
     if (result.kind === 'joining' && !fs.existsSync(TEMPLATES.joining)) {
       // Template not sent yet — log prominently, do NOT send a wrong image
@@ -520,7 +613,7 @@ async function handleMessage(msg) {
   // Unclear (including empty transcription): ask which one it is.
   pending[from] = { askedAt: new Date().toISOString(), text: text.slice(0, 200) };
   savePending(pending);
-  queueClarify(from, clarifyText(), result.reason);
+  queueClarify(from, result.reason);
 }
 
 // ---- HTTP server ----
