@@ -146,7 +146,7 @@ const TEXT_REPLY_KINDS = { zoom: ZOOM_TEXT };
 // joining "EKKALA THONI LINK" button. The body names the button; tapping it
 // opens the slot website. No link printed in the text.
 const SLOT_LINK = 'https://ekkala-thoni-slots.tiiny.site';
-const SLOT_BUTTON_LABEL = 'ஸ்லாட் புக் பண்ண'; // max 20 chars (16)
+const SLOT_BUTTON_LABEL = 'SLOT BOOK'; // max 20 chars (9) — ALL CAPS so it looks bigger and bolder (WhatsApp does not let us set the button font size; caps is the way to make it look bigger, same as 'EKKALA THONI LINK')
 const SLOT_BODY = 'ஊழியங்களை செய்ய ஸ்லாட் புக் பண்ண கீழே உள்ள button-ஐ touch செய்யவும்.';
 
 fs.mkdirSync(LOG_DIR, { recursive: true });
