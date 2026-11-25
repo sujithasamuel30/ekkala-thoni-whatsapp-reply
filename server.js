@@ -88,8 +88,8 @@ const REPLY_DELAY_MS = (parseFloat(process.env.REPLY_DELAY_HOURS || '2') || 2) *
 // options — "is what you sent a prayer request?" / "is what you sent
 // an offering?" — but they map to the same prayer / offering reply as
 // rows 1 and 2. Sujitha's own wording, 2026-11-25.
-const CLARIFY_BODY = 'நீங்கள் எதைப் பற்றி கேட்கிறீர்கள்? (கன்ஃபார்ம் செய்யுங்கள்)';
-const CLARIFY_BUTTON = 'தேர்வு செய்யவும்';
+const CLARIFY_BODY = 'நீங்கள் எதைப் பற்றி கேட்கிறீர்கள்? (கன்ஃபார்ம் செய்யுங்கள்)\nஒன்றை touch செய்யவும்.';
+const CLARIFY_BUTTON = 'தேர்வு (select one)'; // max 20 chars for a list button — 'தேர்வு செய்யவும் (select one)' is 29, so the Tamil is shortened to 'தேர்வு' to fit '(select one)' (Sujitha, 2026-11-25)
 const CLARIFY_ROWS = [
   { id: 'prayer', title: 'ஜெப குறிப்பு', description: 'ஜெப குறிப்பு அனுப்ப' },
   { id: 'offering', title: 'காணிக்கை', description: 'காணிக்கை (offering) பற்றிய விவரம் அறிய.' },
