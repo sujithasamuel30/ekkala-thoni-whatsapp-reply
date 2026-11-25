@@ -83,10 +83,11 @@ const REPLY_DELAY_MS = (parseFloat(process.env.REPLY_DELAY_HOURS || '2') || 2) *
 // Instead of asking the member to TYPE 1-5, send an interactive LIST:
 // one "தேர்வு செய்யவும்" button that opens a list of options; the member
 // taps one and the matching reply goes out. WhatsApp allows at most 10
-// rows in one list; we have 6. The row id comes back as the member's
-// answer (see handleMessage). Row 6 ('prayer-confirm') is a SEPARATE
-// option — "is what you sent a prayer request?" — but it maps to the
-// same prayer reply as row 1. Sujitha's own wording, 2026-11-25.
+// rows in one list; we have 7. The row id comes back as the member's
+// answer (see handleMessage). Rows 6 and 7 are SEPARATE confirmation
+// options — "is what you sent a prayer request?" / "is what you sent
+// an offering?" — but they map to the same prayer / offering reply as
+// rows 1 and 2. Sujitha's own wording, 2026-11-25.
 const CLARIFY_BODY = 'நீங்கள் எதைப் பற்றி கேட்கிறீர்கள்? (கன்ஃபார்ம் செய்யுங்கள்)';
 const CLARIFY_BUTTON = 'தேர்வு செய்யவும்';
 const CLARIFY_ROWS = [
@@ -96,8 +97,10 @@ const CLARIFY_ROWS = [
   { id: 'zoom', title: 'ஜெபக்கூடுகை', description: 'ஜெபக்கூடுகையில் கலந்து கொள்ள' },
   { id: 'slot', title: 'ஸ்லாட் புக்', description: 'ஊழியங்களை செய்ய ஸ்லாட் புக் பண்ண' },
   { id: 'prayer-confirm', title: 'ஜெபக்குறிப்பா?', description: 'நீங்கள் அனுப்பி உள்ளது ஜெபக்குறிப்பா?' },
+  { id: 'offering-confirm', title: 'காணிக்கையா?', description: 'நீங்கள் அனுப்பி உள்ளது காணிக்கையா?' },
 ];
-// Row id -> reply kind. 'prayer-confirm' maps to prayer (same reply as row 1).
+// Row id -> reply kind. The two '-confirm' rows map to prayer / offering
+// (same reply as rows 1 and 2).
 const CLARIFY_ID_TO_KIND = {
   prayer: 'prayer',
   offering: 'offering',
@@ -105,6 +108,7 @@ const CLARIFY_ID_TO_KIND = {
   zoom: 'zoom',
   slot: 'slot',
   'prayer-confirm': 'prayer',
+  'offering-confirm': 'offering',
 };
 
 const TEMPLATES = {
