@@ -55,7 +55,7 @@ const PRAYER_WORDS = [
 const OFFERING_WORDS = [
   'offering',
   'காணிக்கை', 'காணிக்கையை',
-  'kaanikai',
+  'kaanikai', 'kaanikkai',
 ];
 
 // ZOOM = wants the prayer-meeting (Zoom) link. Explicit meeting-join /
