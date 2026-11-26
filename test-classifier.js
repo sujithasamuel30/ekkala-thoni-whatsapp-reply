@@ -26,6 +26,8 @@ const SAMPLES = [
   ['காணிக்கை அனுப்பி உள்ளேன்', 'offering'],
   ['kaanikai anupi ullen', 'offering'],
   ['kaanikai', 'offering'],
+  ['kaanikkai anuppiyirukken', 'offering'],
+  ['offering anuppirukken', 'offering'],
   ['Paid offering through GPay', 'offering'],
   ['offering', 'offering'],
   ['I donated ₹2000 for the ministry', 'unclear'],
