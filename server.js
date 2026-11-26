@@ -130,6 +130,12 @@ const TEMPLATES = {
   // style as the other templates. Sent as an image FIRST, then the Zoom
   // link + passcode as TEXT below it (the passcode must stay visible).
   zoom: path.join(TEMPLATES_DIR, 'zoom-meeting.jpg'),
+  // Clarification template (Sujitha, 2026-11-25): purple starry, same style
+  // as the other templates. "Praise the Lord sister!" on top, the question
+  // in the center, "touch the button below" at the bottom. Sent as the
+  // image HEADER of the clarification LIST message, with the
+  // "தேர்வு (select one)" button below it.
+  clarify: path.join(TEMPLATES_DIR, 'clarify-template.jpg'),
 };
 
 // Ekkala Thoni WhatsApp group joining link — sent with the joining reply
@@ -215,7 +221,7 @@ async function processDueReplies() {
     try {
       if (r.kind === 'clarify') {
         // Clarification goes out as an interactive LIST, not plain text.
-        if (DRY_RUN) log({ event: 'dry_run_send_list', to: r.to, body: CLARIFY_BODY, rows: CLARIFY_ROWS.map((x) => x.id), reason: r.reason });
+        if (DRY_RUN) log({ event: 'dry_run_send_list', to: r.to, image: TEMPLATES.clarify, body: CLARIFY_BODY, rows: CLARIFY_ROWS.map((x) => x.id), reason: r.reason });
         else {
           const id = await sendClarifyList(r.to);
           log({ event: 'clarify_sent', to: r.to, messageId: id, reason: r.reason, list: true });
@@ -444,11 +450,13 @@ async function sendJoiningButton(to) {
   return body.messages && body.messages[0] ? body.messages[0].id : JSON.stringify(body);
 }
 
-// Send the clarification as an interactive LIST message. The member taps
-// the "தேர்வு செய்யவும்" button, sees the 6 options, and taps one —
+// Send the clarification as an interactive LIST message with the pink
+// clarification template image on top. The member taps the
+// "தேர்வு (select one)" button, sees the 7 options, and taps one —
 // no typing needed. This is a free-form interactive message, so it works
 // inside the 24-hour window after the member messaged first.
 async function sendClarifyList(to) {
+  const mediaId = await uploadImage(TEMPLATES.clarify);
   const body = await graphJson(
     `${GRAPH}/${PHONE_NUMBER_ID}/messages`,
     {
@@ -461,6 +469,7 @@ async function sendClarifyList(to) {
         type: 'interactive',
         interactive: {
           type: 'list',
+          header: { type: 'image', image: { id: mediaId } },
           body: { text: CLARIFY_BODY },
           action: {
             button: CLARIFY_BUTTON,
