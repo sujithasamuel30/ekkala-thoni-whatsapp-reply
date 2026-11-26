@@ -394,13 +394,26 @@ function transcribeAudio(filePath) {
   });
 }
 
-// Payment keywords for the OCR check on receipt screenshots. A Google Pay
-// receipt shows these words / symbols; a random photo does not.
-const PAYMENT_WORDS = [
-  'google pay', 'gpay', 'phonepe', 'paytm', 'bhim', 'upi',
-  'paid', 'payment', 'sent', 'transaction', 'successful', 'success',
-  'receipt', 'rs', 'rs.', 'inr', 'rupees', '₹', 'amount',
+// Payment check for the OCR text read out of a photo (tesseract).
+// A screenshot counts as a Google Pay receipt ONLY if the OCR text
+// shows the Google Pay app name (Sujitha, 2026-11-26: only a "gpay
+// screenshot" triggers the offering template).
+//
+// BUG FIX (Sujitha, 2026-11-26): the old list had bare 'sent', 'rs',
+// 'paid', 'success', 'receipt', 'amount'. ANY WhatsApp screenshot has
+// those words — e.g. the system line "New messages will disappear ...
+// after they're sent" — so a random screenshot (status views, a chat,
+// anything) was misread as a Google Pay receipt and got the offering
+// thanks template, even when the person asked something completely
+// different (a song question). PhonePe / Paytm / other screenshots and
+// random photos get NO reply now.
+const PAYMENT_APP_WORDS = [
+  'google pay', 'gpay',
 ];
+function looksLikePaymentReceipt(ocrText) {
+  const t = (ocrText || '').toLowerCase();
+  return PAYMENT_APP_WORDS.some((w) => t.includes(w));
+}
 // Read the text out of an image (tesseract OCR) and say whether it looks
 // like a payment receipt. Returns '' on any failure (treated as not a receipt).
 function ocrImage(filePath) {
@@ -412,10 +425,6 @@ function ocrImage(filePath) {
         resolve((stdout || '').trim());
       });
   });
-}
-function looksLikePaymentReceipt(ocrText) {
-  const t = (ocrText || '').toLowerCase();
-  return PAYMENT_WORDS.some((w) => t.includes(w));
 }
 
 // Joining reply as ONE interactive message: the welcome image on top and a
@@ -623,8 +632,9 @@ async function handleMessage(msg) {
     // (Sujitha, 2026-11-21) and gets the offering template. A random photo
     // (a friend's photo, a snapshot, anything shared) gets NO reply.
     // How we tell them apart: if the image has a caption, classify it;
-    // otherwise read the image with OCR and look for payment words
-    // (Google Pay / Paid / UPI / ₹ / ...). No payment words = random photo.
+    // otherwise read the image with OCR and look for the Google Pay app
+    // name only (Sujitha, 2026-11-26 — "gpay screenshot" only). No
+    // Google Pay name = random photo, no reply.
     //
     // EXCEPTION — bulk forwarders (Sujitha, 2026-11-21): the sister who
     // collects OTHER members' Google Pay receipts and forwards 5-6 at a
@@ -786,3 +796,7 @@ server.listen(PORT, () => {
 // Also runs once at startup, so replies queued before a restart still go out.
 setInterval(() => { processDueReplies().catch((e) => log({ event: 'queue_timer_error', error: String(e).slice(0, 200) })); }, 30000);
 processDueReplies().catch((e) => log({ event: 'queue_startup_error', error: String(e).slice(0, 200) }));
+
+// Exported for local tests (test-ocr.js) — the server still starts
+// normally when run directly.
+module.exports = { looksLikePaymentReceipt };
