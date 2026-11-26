@@ -14,8 +14,8 @@
 //     joining), so the member gets the Zoom link. Bare "prayer meeting"
 //     alone is NOT a zoom keyword, so "please pray for the prayer
 //     meeting" stays prayer.
-//  3. OFFERING — money/offering words win over prayer (a concrete
-//     transaction to acknowledge). If a message has BOTH prayer and
+//  3. OFFERING — only "offering" / "காணிக்கை" / "kaanikai" (Sujitha,
+//     2026-11-26). Wins over prayer: if a message has BOTH prayer and
 //     offering words, offering is chosen and the fact is logged.
 //  4. JOINING (strong phrases) — explicit request to join the group.
 //  5. SLOT — explicit slot-booking request. Checked before prayer so
@@ -45,14 +45,17 @@ const PRAYER_WORDS = [
   'request', 'need prayer', 'prayer request', 'ஜெப குறிப்பு', 'ஜெபக்குறிப்பு',
 ];
 
+// OFFERING — only these words trigger the offering template (Sujitha,
+// 2026-11-26): "offering", "kaanikai" / "காணிக்கை" (this also covers
+// "காணிக்கை அனுப்பி உள்ளேன்" / "kaanikai anupi ullen"), or a Google Pay
+// screenshot (checked by OCR in server.js). Everything else — "sent",
+// "paid", "amount", "Rs", "donation", "tithe" — does NOT trigger it;
+// those messages get the clarification LIST instead, so a wrong
+// template never goes out.
 const OFFERING_WORDS = [
-  'offering', 'offer', 'offered', 'tithe', 'donation', 'donate', 'donated',
-  'காணிக்கை', 'காணிக்கையை', 'தசமபாகம்',
-  'amount', '₹', 'rs.', 'rs ', 'rupees', 'inr',
-  'sent', 'paid', 'payment', 'transferred', 'transfer',
-  'gpay', 'google pay', 'phonepe', 'paytm', 'upi',
-  'கொடுத்தேன்', 'கொடுத்துவிட்டேன்', 'அனுப்பினேன்', 'அனுப்பியிருக்கிறேன்',
-  'கொடுத்த', 'செலுத்தினேன்',
+  'offering',
+  'காணிக்கை', 'காணிக்கையை',
+  'kaanikai',
 ];
 
 // ZOOM = wants the prayer-meeting (Zoom) link. Explicit meeting-join /
