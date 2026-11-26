@@ -17,13 +17,20 @@ const SAMPLES = [
   ['ஜெப குறிப்பு: என் மகனுக்கு வேலை கிடைக்க ஜெபியுங்கள்', 'prayer'],
   ['Please pray, my father is sick', 'prayer'],
   ['pray for us', 'prayer'],
-  // Offerings
+  // Offerings — ONLY "offering" / "காணிக்கை" / "kaanikai" (Sujitha,
+  // 2026-11-26). "sent" / "paid" / "amount" / "Rs" / "donation" alone
+  // do NOT trigger it any more — those get the clarification LIST.
   ['I sent Rs 500 offering', 'offering'],
   ['Offering sent, Rs 1000', 'offering'],
   ['காணிக்கை அனுப்பியிருக்கிறேன்', 'offering'],
-  ['I donated ₹2000 for the ministry', 'offering'],
+  ['காணிக்கை அனுப்பி உள்ளேன்', 'offering'],
+  ['kaanikai anupi ullen', 'offering'],
+  ['kaanikai', 'offering'],
   ['Paid offering through GPay', 'offering'],
   ['offering', 'offering'],
+  ['I donated ₹2000 for the ministry', 'unclear'],
+  ['I sent Rs 500', 'unclear'],
+  ['Paid Rs 500', 'unclear'],
   // Both prayer + offering (offering wins — money to acknowledge)
   ['I sent Rs 500 offering, please pray for my family', 'offering'],
   // Joining — new member wants to join
@@ -63,6 +70,11 @@ const SAMPLES = [
   ['Vanakkam', 'unclear'],
   ['God bless you', 'unclear'],
   ['', 'unclear'],
+  // Song question (2026-11-26) — must be unclear, NOT offering.
+  // Its screenshot wrongly triggered the offering template via OCR
+  // (the word "sent" in the WhatsApp system text); the text itself
+  // must never classify as offering.
+  ['பாட்டு அனுப்பிட்டாங்களா இல்ல போன் பண்ணி எதுவும் கேட்கணுமா அக்கா', 'unclear'],
 ];
 
 const TEMPLATE = {
